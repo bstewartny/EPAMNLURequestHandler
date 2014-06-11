@@ -1,0 +1,6 @@
+.DS_Store
+dist/
+*.jar
+*.class
+_Store
+
