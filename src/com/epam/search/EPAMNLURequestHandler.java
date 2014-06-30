@@ -13,6 +13,7 @@ import org.apache.lucene.index.IndexableField;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.index.Terms;
 import org.apache.lucene.index.TermsEnum;
+import org.apache.lucene.queryparser.surround.parser.QueryParser;
 import org.apache.lucene.search.Filter;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.ScoreDoc;
@@ -90,6 +91,7 @@ public class EPAMNLURequestHandler extends RequestHandlerBase {
         List<NE> entities=new ArrayList<NE>();
         List<String> facets=new ArrayList<String>();
         List<String> keywords=new ArrayList<String>();
+        String text_query="";
         
         for(String word:words)
         {
@@ -104,18 +106,25 @@ public class EPAMNLURequestHandler extends RequestHandlerBase {
             }
             else    
             {
-                List<NE> matched_entities=getEntitiesForWord(word,searcher);
+                text_query+=word+" ";
+                //List<NE> matched_entities=getEntitiesForWord(word,searcher);
                  
-                for(NE entity:matched_entities)
-                {
-                    entities.add(entity);
-                }
+                //for(NE entity:matched_entities)
+                //{
+                //    entities.add(entity);
+                //}
             }
         }
         
+        //List<NE> matched_entities=getEntitiesForQuery(text_query,searcher);
+        //for(NE entity:matched_entities)
+        //{
+        //           entities.add(entity);
+        //}
+        
         NLUQuery query=new NLUQuery();
         
-        query.SolrQuery=createSolrQuery(entities);
+        query.SolrQuery="text:(" + text_query + ")"; //createSolrQuery(entities);
         
         query.FacetField=null;
         
@@ -127,8 +136,8 @@ public class EPAMNLURequestHandler extends RequestHandlerBase {
         }
         query.AnswerType=query.FacetField==null?"documents":query.FacetField;
         
-        String criteria="";
-        
+        String criteria=text_query;
+        /*
         if(entities.size()>0)
         {
             for(NE entity:entities)
@@ -137,7 +146,7 @@ public class EPAMNLURequestHandler extends RequestHandlerBase {
                     criteria+=", ";
                 criteria+=entity.value;
             }
-        }
+        }*/
         
         query.ResponseTextMultiple="I found <N> "+query.AnswerType +"s related to "+criteria+". Here they are.";
         
@@ -342,7 +351,7 @@ public class EPAMNLURequestHandler extends RequestHandlerBase {
     {
         if(word.length()<3) return true;
         // TODO: use comprehensive list of noise words
-        String[] noise="the|show|me|tell|find|about".split("|");
+        String[] noise="the|did|was|show|me|tell|find|about".split("|");
         for(String n:noise)
         {
             if(word.equalsIgnoreCase(n)) return true;
@@ -377,7 +386,18 @@ public class EPAMNLURequestHandler extends RequestHandlerBase {
     
         return null;
     }
-    
+    private List<NE> getEntitiesForQuery(String query,SolrIndexSearcher searcher) throws Exception
+    {
+        System.out.println("getEntitiesForQuery: "+query);
+       
+        List<NE> entities=new ArrayList<NE>();
+     
+        //QParser.getParser(query, query, null)
+        
+        return entities;
+        
+    }
+       
      
     private List<NE> getEntitiesForWord(String word,SolrIndexSearcher searcher) throws Exception
     {

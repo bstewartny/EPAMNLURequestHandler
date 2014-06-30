@@ -29,7 +29,7 @@ public class EPAMNLUUpdateRequestProcessorFactory extends UpdateRequestProcessor
         this.args=args;
         
         Properties props=new Properties();
-        props.put("annotators", "tokenize, ssplit, pos, lemma, ner, parse, dcoref");
+        props.put("annotators", "tokenize, ssplit, pos, lemma, ner");
         this.pipeline=new StanfordCoreNLP(props);
     }
     

@@ -5,28 +5,23 @@
 package com.epam.search;
 
 import java.io.IOException;
-import org.apache.solr.core.SolrCore;
 import org.apache.solr.update.AddUpdateCommand;
 import org.apache.solr.update.processor.UpdateRequestProcessor;
 import edu.stanford.nlp.pipeline.*;
 import edu.stanford.nlp.ling.CoreAnnotations;
 import edu.stanford.nlp.ling.CoreLabel;
-import edu.stanford.nlp.util.ArrayCoreMap;
 import edu.stanford.nlp.util.CoreMap;
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
-import java.util.Properties;
 import org.apache.solr.common.SolrInputDocument;
-import org.apache.solr.common.util.NamedList;
 /**
  *
  * @author bstewart
  */
 public class EPAMNLUUpdateRequestProcessor extends UpdateRequestProcessor {
     
-    static final int MAX_TEXT_LENGTH=100000;
+    static final int MAX_TEXT_LENGTH=10000;
     
     public EPAMNLUUpdateRequestProcessor(StanfordCoreNLP pipeline,UpdateRequestProcessor next){
         super(next);
@@ -84,9 +79,13 @@ public class EPAMNLUUpdateRequestProcessor extends UpdateRequestProcessor {
     
     private void extractEntities(String text,List<NE> entities)
     {
+        System.out.println("EPAMNLUUpdateRequestProcessor::exractEntities: text.length="+text.length());
+    
         Annotation annotation=new Annotation(text);
-        
+       
+        System.out.println("pipeline.annotate start");
         pipeline.annotate(annotation);
+        System.out.println("pipeline.annotate end");
         
         List<CoreMap> sentences=annotation.get(CoreAnnotations.SentencesAnnotation.class);
         
@@ -115,10 +114,25 @@ public class EPAMNLUUpdateRequestProcessor extends UpdateRequestProcessor {
     
     private void addEntityFields(List<NE> entities,SolrInputDocument doc)
     {
+        HashSet<String> h=null;//new HashSet<String>();
         for(NE entity:entities)
         {
-            System.out.println("Adding field: "+"epamnlu_"+entity.type.toLowerCase()+":"+entity.value.toLowerCase().trim());
-            doc.addField("epamnlu_"+entity.type.toLowerCase(), entity.value.toLowerCase().trim());
+            String name=entity.type.toLowerCase();
+            if(name.equalsIgnoreCase("person") ||
+                    name.equalsIgnoreCase("location") ||
+                    name.equalsIgnoreCase("date") ||
+                    name.equalsIgnoreCase("organization"))
+            {
+                if(h==null) h=new HashSet<String>();
+                String value=entity.value.toLowerCase();
+                String key=name+":"+value;
+                if(!h.contains(key))
+                {
+                    h.add(key);
+                    System.out.println("Adding field: epamnlu_"+key);
+                    doc.addField("epamnlu_"+name, value);
+                }
+            }
         }
     }
     
@@ -143,6 +157,7 @@ public class EPAMNLUUpdateRequestProcessor extends UpdateRequestProcessor {
     
     private List<String> getTextsToAnalyze(SolrInputDocument doc)
     {
+        System.out.println("EPAMNLUUpdateRequestProcessor::getTextsToAnalyze");
         ArrayList<String> texts=new ArrayList<String>();
         
         // TODO: for now get all the fields, but later on use some configuration from solrconfig.xml
