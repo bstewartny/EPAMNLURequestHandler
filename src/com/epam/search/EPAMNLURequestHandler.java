@@ -61,26 +61,13 @@ public class EPAMNLURequestHandler extends RequestHandlerBase {
         public String ResponseTextSingle;
     }
     
+    private String escape(String s)
+    {
+        return org.apache.lucene.queryparser.classic.QueryParser.escape(s);
+    }
     private String entityToTermQuery(NE ne)
     {
         return ne.type+":\""+org.apache.lucene.queryparser.classic.QueryParser.escape(ne.value)+"\"";
-    }
-    
-    private String createSolrQuery(List<NE> entities)
-    {
-        if(entities.size()==0)
-            return "*:*";
-        
-        String query="(";
-        
-        for(NE entity:entities)
-        {
-            query+=entityToTermQuery(entity)+" ";
-        }
-        
-        query+=")";
-        
-        return query;
     }
     
     private NLUQuery transformQuery(String naturalLanguageQuery,SolrIndexSearcher searcher) throws Exception
@@ -89,9 +76,8 @@ public class EPAMNLURequestHandler extends RequestHandlerBase {
         
         String[] words=tokenize(naturalLanguageQuery);
         
-        List<NE> entities=new ArrayList<NE>();
         List<String> facets=new ArrayList<String>();
-        List<String> keywords=new ArrayList<String>();
+        
         String text_query="";
         
         for(String word:words)
@@ -107,27 +93,9 @@ public class EPAMNLURequestHandler extends RequestHandlerBase {
             }
             else    
             {
-                //text_query+=word+" ";
-                //List<NE> matched_entities=getEntitiesForWord(word,naturalLanguageQuery,searcher);
-                //if(matched_entities!=null && matched_entities.size()>0)
-                //{
-                //    for(NE entity:matched_entities)
-                //    {
-                //        entities.add(entity);
-                //    }
-                //}
-                //else
-                //{
-                    text_query+=word+" ";
-                //}
+                text_query+=word+" ";   
             }
         }
-        
-        //List<NE> matched_entities=getEntitiesForQuery(text_query,searcher);
-        //for(NE entity:matched_entities)
-        //{
-        //           entities.add(entity);
-        //}
         
         NLUQuery query=new NLUQuery();
         
@@ -144,16 +112,6 @@ public class EPAMNLURequestHandler extends RequestHandlerBase {
         query.AnswerType=query.FacetField==null?"documents":query.FacetField;
         
         String criteria=text_query;
-        /*
-        if(entities.size()>0)
-        {
-            for(NE entity:entities)
-            {
-                if(criteria.length()>0)
-                    criteria+=", ";
-                criteria+=entity.value;
-            }
-        }*/
         
         query.ResponseTextMultiple="I found <N> "+query.AnswerType +"s related to "+criteria+". Here they are.";
         
@@ -163,8 +121,6 @@ public class EPAMNLURequestHandler extends RequestHandlerBase {
         
         return query;
     }
-    
-    
     
     @Override
     public String getDescription()
@@ -192,7 +148,6 @@ public class EPAMNLURequestHandler extends RequestHandlerBase {
    
     private String[] getParams(String name)
     {
-         
         String[] params=invariants.getParams(name);
         if(params.length==1)
         {
@@ -213,10 +168,10 @@ public class EPAMNLURequestHandler extends RequestHandlerBase {
         }
         return a;
     }
+    
     private String removeStupidBrackets(String p)
     {
         // no idea why there are [ ] surrounding these strings loaded from solrconfig.xml!!!!!!!!!!!! WTF?
-        
         return p.replaceAll("\\[", "").replaceAll("\\]","");
     }
     
@@ -229,51 +184,6 @@ public class EPAMNLURequestHandler extends RequestHandlerBase {
             d.addField(fld.name(), fld.stringValue());
         }
         return d;
-    }
-    
-    private SolrDocument findAnswerDocument(TopDocs docs,SolrIndexSearcher searcher,String facetField) throws Exception
-    {
-        for(ScoreDoc scoreDoc:docs.scoreDocs){
-            Document doc=searcher.doc(scoreDoc.doc);
-             
-            String title=doc.get("title");
-            if(title!=null)
-            {
-                 System.out.println("scoreDoc: "+scoreDoc.doc+": title: "+title);
-                title=title.trim();
-                if(title.length()>0)
-                {
-                    String[] values=doc.getValues(facetField);
-                    if(values!=null && values.length>0)
-                    {
-                        for(String value:values)
-                        {
-                            if(value.trim().equalsIgnoreCase(title))
-                            {
-                                return createSolrDocument(doc);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        
-        return null;
-    }
-    
-    private SolrDocumentList createSolrDocuments(TopDocs docs,SolrIndexSearcher searcher) throws Exception
-    {
-        System.out.println("EPAMNLURequestHandler::createSolrDocuments");
-        SolrDocumentList results=new SolrDocumentList();
-         
-        for(ScoreDoc scoreDoc:docs.scoreDocs)
-        {
-            results.add(createSolrDocument(searcher.doc(scoreDoc.doc)));
-        }
-         
-        results.setNumFound(docs.scoreDocs.length);
-        results.setStart(0);
-        return results;
     }
     
     private NamedList<Integer> getFacetCounts(String facetField,SolrQueryRequest req,DocSet docSet,SolrParams params ) throws Exception
@@ -290,7 +200,7 @@ public class EPAMNLURequestHandler extends RequestHandlerBase {
         return f.getTermCounts(facetField);
     }
     
-    private HashMap getFacetResult(SolrQueryRequest req,NLUQuery nluQuery, String facetValue, SolrIndexSearcher searcher, Filter filter) throws Exception
+    private HashMap getFacetResult(SolrQueryRequest req,NLUQuery nluQuery, String facetValue, SolrIndexSearcher searcher, Filter filter,int span) throws Exception
     {
         HashMap facetResult=new HashMap();
                
@@ -298,10 +208,15 @@ public class EPAMNLURequestHandler extends RequestHandlerBase {
         facetResult.put("nlu_facet_field", nluQuery.FacetField);
         facetResult.put("nlu_answer_type",nluQuery.AnswerType);
 
-        String query="text:\""+facetValue +" "+nluQuery.Keywords+"\"~100 OR text:\""+nluQuery.Keywords +" "+facetValue+"\"~100";
+        String query="text:\""+escape(facetValue) +" "+nluQuery.Keywords+"\"~"+span;
+        
+        query+=" OR text:\""+nluQuery.Keywords +" "+escape(facetValue)+"\"~"+span;
+        
+        query+=" OR (titleText:\""+escape(facetValue)+"\" AND text:("+nluQuery.Keywords+"))";
+        
         QParser parser=QParser.getParser(query,null,req);
          
-        TopDocs topDocs=searcher.search(parser.getQuery(),5);
+        TopDocs topDocs=searcher.search(parser.getQuery(),1);
         
         if(topDocs.totalHits>0)
         {
@@ -309,10 +224,8 @@ public class EPAMNLURequestHandler extends RequestHandlerBase {
         }
         else
         {
-            
             return null;
         }
-        
     }
     
     @Override
@@ -329,79 +242,73 @@ public class EPAMNLURequestHandler extends RequestHandlerBase {
         System.out.println("EPAMNLURequestHandler::nluQuery: "+nluQuery.SolrQuery);
         
         QParser parser=QParser.getParser(nluQuery.SolrQuery,null,req);
-        /*
         
-            1) look for best document matches
-            2) look for top facets over those documents
-            3) for each facet:
-                   try looking for "<facet value> <natural query>"~100 to see if it matches text
-                   for instance:
-                        facet value:"isaac newton"
-                        question: "who invented calculus"
-                        "who invented calculus" --> "isaac newton invented calculus"~100
-        
-        */
-        
-        
-        
-        TopDocs topDocs=searcher.search(parser.getQuery(), params.getInt(CommonParams.ROWS,10));
+        TopDocs topDocs=searcher.search(parser.getQuery(), params.getInt(CommonParams.ROWS,20));
         
         List facetResults=new ArrayList();
         
         if(nluQuery.FacetField!=null)
         {
-            // see if any of top docs are match for this facet field
-             
-            SolrDocument answerDoc=findAnswerDocument(topDocs,searcher,nluQuery.FacetField);
-            
-            if(answerDoc!=null)
-            {   
-                if(!naturalLanguageQuery.toLowerCase().contains(((String)answerDoc.getFieldValue("title")).toLowerCase()))
-                { 
-                    facetResults.add(answerDoc);
-                }
-            }
-             
             DocSet docSet;
 
             int[] docs=new int[topDocs.scoreDocs.length];
+            
             int i=0;
+            
             for(ScoreDoc scoreDoc:topDocs.scoreDocs)
             {
                 docs[i++]=scoreDoc.doc;
             }
+            
             docSet=new SortedIntDocSet(docs);
 
             NamedList<Integer> counts=getFacetCounts(nluQuery.FacetField,req,docSet,params);
 
             Filter filter=docSet.getTopFilter();
 
-            for(Map.Entry<String,Integer> kv:counts)
+            int span=10;
+            
+            int max_span=120;
+            
+            int good_facets=0;
+            
+            while(span<=max_span)
             {
-                String fieldValue=kv.getKey().trim();
-                Integer count=kv.getValue();
-                if(naturalLanguageQuery.toLowerCase().contains(fieldValue.toLowerCase()))
+                for(Map.Entry<String,Integer> kv:counts)
                 {
-                    continue; // HACK
-                }
-                if(answerDoc!=null)
-                {
-                    if(fieldValue.toLowerCase().contains((String)answerDoc.getFieldValue("title")))
+                    String fieldValue=kv.getKey().trim();
+                    
+                    Integer count=kv.getValue();
+                    
+                    if(naturalLanguageQuery.toLowerCase().contains(fieldValue.toLowerCase()))
                     {
                         continue; // HACK
                     }
-                }
-                if(fieldValue.contains(" ")) // HACK: entity names as NLP NE should have more than one word...
-                {
-                    System.out.println(fieldValue+": "+count);
-                    if(count>0)
+                    
+                    if(fieldValue.contains(" ")) // HACK: entity names as NLP NE should have more than one word...
                     {
-                        HashMap facetResult=getFacetResult(req,nluQuery,fieldValue,searcher,filter);
-                        if(facetResult!=null)
-                            facetResults.add(facetResult);
-                         
+                        if(count>0)
+                        {
+                            good_facets++;
+                            HashMap facetResult=getFacetResult(req,nluQuery,fieldValue,searcher,filter,span);
+                            if(facetResult!=null)
+                                facetResults.add(facetResult);
+                        }
                     }
                 }
+                
+                if(facetResults.size()>0)
+                {
+                    System.out.println("Found "+facetResults.size()+" facets with span="+span);
+                    break;
+                }
+                   
+                if(good_facets==0)
+                {
+                    System.out.println("There are no 'good' facets...");
+                    break;
+                }
+                span+=10;
             }
         }
         addFacetResults(rsp,facetResults,nluQuery);
@@ -437,9 +344,7 @@ public class EPAMNLURequestHandler extends RequestHandlerBase {
         String[] noise="the|did|was|show|tell|find|about|this|that|there|their|then|this".split("\\|");
         for(String n:noise)
         {   
-            System.out.println("is '"+word+"' a noise word equal to: '"+n+"'?");
             if(word.equalsIgnoreCase(n)){
-                System.out.println("Yes its a noise word");
                 return true;
             }
         }
@@ -448,104 +353,24 @@ public class EPAMNLURequestHandler extends RequestHandlerBase {
     
     private String getFacetForWord(String word)
     {
-        System.out.println("getFacetForWord: "+word);
-        
         for(String facetSpec:facetSpecs)
         {
             String[] p=facetSpec.split(":");
             String facet=p[0];
             if(word.equalsIgnoreCase(facet))
             {
-                System.out.println("Found facet "+facet+" for word: "+word);
                 return facet;
             }
             String[] words=p[1].split("\\|");
             for(String facetWord:words)
             {
-                System.out.println("facetWord: "+facetWord);
                 if(word.equalsIgnoreCase(facetWord))
                 {
-                    System.out.println("Found facet "+facet+" for word: "+word);
                     return facet;
                 }
             }
         }
     
         return null;
-    }
-    private List<NE> getEntitiesForQuery(String query,SolrIndexSearcher searcher) throws Exception
-    {
-        System.out.println("getEntitiesForQuery: "+query);
-       
-        List<NE> entities=new ArrayList<NE>();
-     
-        //QParser.getParser(query, query, null)
-        
-        return entities;
-        
-    }
-       
-     
-    private List<NE> getEntitiesForWord(String word,String query,SolrIndexSearcher searcher) throws Exception
-    {
-        System.out.println("getEntitiesForWord: "+word);
-       
-        List<NE> entities=new ArrayList<NE>();
-        
-        if(word.length()>2)
-        {
-            final AtomicReader indexReader = searcher.getAtomicReader();
-            
-            Fields lfields=indexReader.fields();
-
-            for(String field:entityFields)
-            {
-                FieldType ft=new StrField();
-
-                Terms terms=lfields.terms(field);
-
-                if(terms==null)
-                {
-                    continue;
-                }
-                
-                TermsEnum termsEnum=terms.iterator(null);
-
-                BytesRef prefixBytes=new BytesRef(word); // word is lowercase
-                
-                BytesRef term=null;
-
-                if(termsEnum.seekCeil(prefixBytes)==TermsEnum.SeekStatus.END)
-                {
-                    continue;
-                }
-
-                term=termsEnum.term();
-
-                CharsRef external=new CharsRef();
-                
-                while(term!=null)
-                {
-                    ft.indexedToReadable(term, external);
-                    
-                    if(!StringHelper.startsWith(term,prefixBytes))
-                    {
-                        break;
-                    }
-                    else    
-                    { 
-                        if(query.toLowerCase().contains(external.toString().toLowerCase()))
-                        {
-                            NE ne=new NE(field,external.toString());
-                            System.out.println("Found entity "+ne.toString()+" for word: "+word);
-                            entities.add(ne);
-                        }
-                    }
-                    term=termsEnum.next();
-                }
-            }
-        }
-        
-        return entities;
     }
 }
